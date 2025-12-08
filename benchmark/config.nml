@@ -1,0 +1,10 @@
+&info
+nelements=56197120,
+nfields=100,
+field_base_name="data1D",
+file_name="axis",
+operation="write",
+check=.false.,
+par_access="write",
+log=0
+/
