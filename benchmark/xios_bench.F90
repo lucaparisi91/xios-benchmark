@@ -68,43 +68,74 @@ end module timer_mod
 module partition_mod
     use mpi
     implicit none
-  
+
     type :: partition_info 
-      integer ::  n_global 
-      integer :: n_local 
-      integer :: ibegin_global
+      integer , dimension(:) , allocatable::  n_global
+      integer , dimension(:), allocatable :: n_local
+      integer , dimension(:), allocatable :: ibegin_global
       integer :: comm
+
     end type
   
     contains
 
 
-    subroutine create_partition( n_global , comm ,info )
+    subroutine create_partition( n_global ,n_proc, comm ,info )
       type(partition_info), intent(out) :: info 
-      integer,intent(in) :: n_global
+      integer,intent(in) :: n_global(:)
       integer,intent(in) :: comm
-  
+      integer,intent(in) :: n_proc(:)
+      
+      integer :: ndims
       integer :: nRanks 
       integer :: rank
-      integer :: ierr
+      integer :: ierr,d
       integer :: remainder
+      integer :: dims
+      integer :: nProcs
+      logical, dimension(:), allocatable :: periodic
+      integer,dimension(:), allocatable :: rank_coords
+
       
-      call MPI_Comm_rank(comm , rank, ierr)
+      
+      ndims=size(n_proc)
+      
+      allocate( periodic(1:ndims) )
+      allocate( rank_coords(1:ndims) )
+
+      periodic=.false.
+      
       call MPI_Comm_size(comm, nRanks,ierr)
+      write (*,*) "N. ranks: " , product(n_proc) , ", " , nRanks
+      if ( product(n_proc) /= nRanks ) then 
+        write (*,*) "Error: Expected " , nRanks , "processors. Got ", product(n_proc) , "instead" 
+        call mpi_abort(comm,-1,ierr)
+      endif
       
-      info%comm=comm
+
+      call MPI_Cart_create ( comm, ndims, n_proc , periodic, .false., info%comm,ierr)
+      
+      call MPI_Comm_rank(info%comm , rank, ierr)
+      call MPI_Comm_size(info%comm, nRanks,ierr)
+      call MPI_Cart_coords (info%comm, rank, ndims, rank_coords,ierr)
+      
       info%n_global=n_global
-      info%n_local=n_global/nRanks
+      allocate( info%n_local(1:ndims) )
+      allocate( info%ibegin_global(1:ndims) )
 
-      remainder = mod(n_global, nRanks)
-      info%ibegin_global=rank * info%n_local
+      do d=1,ndims
+        info%n_local(d)=n_global(d)/n_proc(d)
 
-      if (rank < remainder) then 
-        info%n_local=info%n_local + 1
-        info%ibegin_global=info%ibegin_global + rank
-      else 
-        info%ibegin_global=info%ibegin_global + remainder
-      endif 
+        remainder = mod(n_global(d), n_proc(d) )
+        info%ibegin_global(d)=rank_coords(d) * info%n_local(d)
+
+        if ( rank_coords(d) < remainder ) then 
+          info%n_local(d)= info%n_local(d) + 1
+          info%ibegin_global(d)= info%ibegin_global(d) + rank_coords(d)
+        else
+          info%ibegin_global(d)=info%ibegin_global(d) + remainder
+        endif 
+      end do
 
     end subroutine
   
@@ -119,7 +150,10 @@ module partition_mod
 
       character(len=max_characters) :: field_base_name, file_name
       integer :: nfields
-      integer :: nelements
+      integer, allocatable :: shape(:)
+      integer, allocatable :: n_proc(:)
+      integer :: nfiles
+      
       character(len=max_characters) :: operation
       character(len=max_characters) :: par_access
       logical :: check
@@ -129,11 +163,13 @@ module partition_mod
         procedure,public :: init
         procedure, public :: get_nfields
         procedure, public :: get_file_name
+        procedure, public :: get_file_id
     end type  
 
     private :: get_field_name
     private :: init
     private :: get_file_name
+    private :: get_file_id
 
     contains
 
@@ -147,7 +183,11 @@ module partition_mod
       logical :: check
       integer :: log
       character(len=max_characters) :: file_name,field_base_name,operation,par_access
-      namelist /info/nelements,nfields,field_base_name,file_name,operation,check,log,par_access
+      integer :: n_proc(4)
+      integer :: shape(4)
+      integer :: nfiles
+
+      namelist /info/nelements,nfields,field_base_name,file_name,operation,check,log,par_access,n_proc,shape,nfiles
       
       open(newunit=io, file=file_name_list,action="read")
       read(unit=io,nml=info)
@@ -157,11 +197,14 @@ module partition_mod
       this%field_base_name=field_base_name
       this%file_name=file_name
       this%nfields = nfields
-      this%nelements = nelements
       this%operation = operation
       this%check = check
       this%log = log 
       this%par_access = par_access
+      this%n_proc=n_proc
+      this%shape=shape
+      this%nfiles = nfiles
+
     end subroutine
 
     function get_nfields(this) result(nfields)
@@ -171,20 +214,36 @@ module partition_mod
       nfields=this%nfields
     end function
 
-    function get_file_name(this) result(file_name)
+    function get_file_name(this, i) result(file_name)
       class(file_info),intent(in) :: this
-      character(len=max_characters) :: file_name
-      file_name = this%file_name
+      integer, intent(in) :: i
+      character(len=max_characters+5) :: file_name
+      character(len=5) :: i_str
+
+      write(i_str,'(I5.5)') i 
+      file_name = trim(this%file_name) // i_str
+
+    end function
+
+    function get_file_id(this, i) result(file_id)
+      class(file_info),intent(in) :: this
+      integer, intent(in) :: i
+      character(len=max_characters) :: file_id
+      character(len=5) :: i_str
+      write(i_str,'(I5.5)') i 
+      file_id = "axis_output" // i_str
+
 
     end function
 
     
-    function get_field_name(this,i) result(field_name )
+    function get_field_name(this,iFile,iField) result(field_name )
       class(file_info) :: this
-      integer, intent(in) :: i
+      integer, intent(in) :: iFile
+      integer, intent(in) :: iField
       character(len= max_characters) :: field_name
 
-      write(field_name,"(A8,I5.5)") this%field_base_name, i
+      write(field_name,"(A8,I5.5,I5.5)") this%field_base_name, iFile, iField
       
     end function get_field_name
 
@@ -231,6 +290,7 @@ module partition_mod
       type(partition_info),intent(out) :: pinfo 
       type(file_info),intent(out) :: finfo
       type(xios_filegroup) :: fgroup
+      integer :: ifile
   
       integer :: comm = -1
       integer :: rank = -1
@@ -239,7 +299,7 @@ module partition_mod
       integer :: nfields = 1
       character(len = max_characters) :: field_name
       integer :: i
-      
+
       ! Arbitrary datetime setup, required for XIOS but unused
       ! in this example
       origin = xios_date(2022, 2, 2, 12, 0, 0)
@@ -259,37 +319,54 @@ module partition_mod
       call xios_set_time_origin(origin)
       call xios_set_start_date(start)
       call xios_set_timestep(tstep)
-      
-      CALL xios_get_file_handle("axis_output",file_hdl)
-
-      CALL xios_set_file_attr("axis_output",name=finfo%get_file_name() )
-      CALL xios_set_file_attr("axis_output",type="one_file")
-      CALL xios_set_file_attr("axis_output",output_freq=tstep)
-      call xios_set_file_attr("axis_output",par_access=finfo%par_access)
-      if (finfo%operation == "read") then 
-        call xios_set_file_attr("axis_output",mode="read")
-        
-        
-      endif
-      
-      call create_partition(finfo%nelements,comm,pinfo) ! distribute levels in the field across clients and save distribution info in pinfo
-      call xios_set_axis_attr("pressure_levels1",n_glo=pinfo%n_global,begin=pinfo%ibegin_global,n=pinfo%n_local)
-      call xios_set_file_attr("axis_output",output_freq=tstep)
 
 
+      call create_partition(finfo%shape,finfo%n_proc,comm,pinfo) ! distribute levels in the field across clients and save distribution info in pinfo
+      call xios_set_axis_attr("pressure_levels1",n_glo=pinfo%n_global(1),begin=pinfo%ibegin_global(1),n=pinfo%n_local(1))
+      call xios_set_axis_attr("panel",n_glo=pinfo%n_global(4),begin=pinfo%ibegin_global(4),n=pinfo%n_local(4) )
+
+      call xios_set_domain_attr("horizontal_domain", &
+                                ni_glo=pinfo%n_global(2),ibegin=pinfo%ibegin_global(2),ni=pinfo%n_local(2), &
+                                nj_glo=pinfo%n_global(3),jbegin=pinfo%ibegin_global(3),nj=pinfo%n_local(3) &
+                                )
       
-      ! Add fields
-      do i=1, finfo%get_nfields()
-        field_name=finfo%get_field_name(i)
-        call xios_add_fieldtofile(file_hdl,field_hdl,field_name)
-        call xios_set_field_attr(field_name,grid_ref="model")
-        call xios_set_field_attr(field_name,name=field_name)
-        call xios_set_field_attr(field_name,operation="instant")
-        call xios_set_field_attr(field_name,freq_op=tstep)    
-        if (finfo%operation == "read") then  
-          call xios_set_field_attr(field_name,read_access=.true.)
-        endif 
+      CALL xios_get_filegroup_handle("output_files",fgroup)
+
+      do ifile=1,finfo%nfiles
+        call xios_add_file(fgroup, file_hdl, finfo%get_file_id(iFile))
+
+
+        CALL xios_set_file_attr(finfo%get_file_id(ifile),name=finfo%get_file_name(ifile) )
+        CALL xios_set_file_attr(finfo%get_file_id(ifile),type="one_file")
+        CALL xios_set_file_attr(finfo%get_file_id(ifile),output_freq=tstep)
+        call xios_set_file_attr(finfo%get_file_id(ifile),par_access=finfo%par_access)
+        if (finfo%operation == "read") then 
+          call xios_set_file_attr(finfo%get_file_id(ifile),mode="read")
         
+        
+        endif
+
+        call xios_set_file_attr(finfo%get_file_id(ifile),output_freq=tstep)
+      
+      
+      
+
+
+      
+        ! Add fields
+        do i=1, finfo%get_nfields()
+          field_name=finfo%get_field_name(ifile,i)
+          call xios_add_fieldtofile(file_hdl,field_hdl,field_name)
+          call xios_set_field_attr(field_name,grid_ref="model")
+          call xios_set_field_attr(field_name,name=field_name)
+          call xios_set_field_attr(field_name,operation="instant")
+          call xios_set_field_attr(field_name,freq_op=tstep)    
+          if (finfo%operation == "read") then  
+            call xios_set_field_attr(field_name,read_access=.true.)
+          endif 
+          
+        enddo
+
       enddo
 
 
@@ -308,7 +385,58 @@ module partition_mod
       call xios_finalize()
   
     end subroutine finalise
-  
+    
+    subroutine set_data( data, pinfo)
+      type(partition_info) , intent(in) :: pinfo
+      double precision, dimension(:,:,:,:), intent(inout) :: data
+
+      integer :: i,j,k,t
+
+      do t=1,pinfo%n_local(4)
+        do j=1,pinfo%n_local(3)
+          do i=1,pinfo%n_local(2)
+            do k=1,pinfo%n_local(1)
+              
+              data(k,i,j,t)= ( pinfo%ibegin_global(1) + k + (pinfo%ibegin_global(2) + i - 1 )*pinfo%n_global(1) + &
+             (pinfo%ibegin_global(3) + j - 1)*pinfo%n_global(1)*pinfo%n_global(2) + &
+            (pinfo%ibegin_global(4) + t - 1)*pinfo%n_global(1)*pinfo%n_global(2)*pinfo%n_global(3) )* &
+                          1d0 / (pinfo%n_global(1)*pinfo%n_global(2) *pinfo%n_global(3)*pinfo%n_global(4) )
+            end do 
+          end do
+        end do 
+      end do
+
+    end subroutine
+
+    subroutine check_data( data, pinfo)
+      type(partition_info) , intent(in) :: pinfo
+      double precision, dimension(:,:,:,:), intent(inout) :: data
+
+      integer :: i,j,k,t
+      double precision :: err
+
+      do t=1,pinfo%n_local(4)
+        do j=1,pinfo%n_local(3)
+          do i=1,pinfo%n_local(2)
+            do k=1,pinfo%n_local(1)
+              
+              err= abs( data(k,i,j,t) - ( pinfo%ibegin_global(1) + k + (pinfo%ibegin_global(2) + i - 1 )*pinfo%n_global(1) + &
+             (pinfo%ibegin_global(3) + j - 1)*pinfo%n_global(1)*pinfo%n_global(2) + &
+            (pinfo%ibegin_global(4) + t - 1)*pinfo%n_global(1)*pinfo%n_global(2)*pinfo%n_global(3) )* &
+                          1d0 / (pinfo%n_global(1)*pinfo%n_global(2) *pinfo%n_global(3)*pinfo%n_global(4) ) )
+              
+              if (err > 1e-5) then 
+                write(*,*) "Error at " , i,j,k,". Error:  ", err
+                call mpi_abort(MPI_COMM_WORLD,-1,ierr)
+              endif
+              
+            end do 
+          end do
+        end do 
+      end do
+
+    end subroutine
+
     subroutine simulate(pinfo,finfo)
       use, intrinsic :: iso_fortran_env, only : dp=> real64
       use timer_mod , only : timer 
@@ -324,61 +452,72 @@ module partition_mod
       integer :: ilevel
       integer :: ifield
       double precision :: elapsed
-      integer :: rank
+      integer :: rank, ierr
+      integer :: ifile
+      logical :: is_first_data_point
       
-      double precision, dimension (:), allocatable :: inpdata
+      double precision, dimension (:,:,:,:), allocatable :: inpdata
       double precision , parameter:: max_integer = 1000000
 
+      is_first_data_point=.true.
       io_timer = timer(pinfo%comm)
       call MPI_Comm_rank(pinfo%comm,rank,ierr)
-
-      allocate ( inpdata(pinfo%n_local) )
+      
+      allocate ( inpdata(pinfo%n_local(1) , pinfo%n_local(2),pinfo%n_local(3),pinfo%n_local(4)) )
+      inpdata=0
       ts=1
+      
+      !call sleep(10)
+      !call mpi_barrier(pinfo%comm,ierr )
+
       if (finfo%operation=="write") then 
         call xios_update_calendar(ts)
       endif
       !CALL xios_get_handle("axis_output",file_hdl)
       
+      do ifile=1,finfo%nfiles
+
+        do ifield=1,finfo%get_nfields()
+          if (finfo%log >=1) write(*,*) "Generating a field"
+          
+          
+          if (finfo%operation == "write") then 
+            if (finfo%log >=1) write(*,*) "Sending a field"
+            !write(*,*) rank,": ",pinfo%ibegin_global
+
+            call set_data( inpdata, pinfo)
+            if (.not. is_first_data_point) call io_timer%start()
+            call xios_send_field(finfo%get_field_name(ifile,ifield), inpdata)
+            if (.not. is_first_data_point) call io_timer%stop()
+
+          
+            if ( is_first_data_point) is_first_data_point=.false.
+
+          else if (finfo%operation == "read") then
+            
+            if (finfo%log >=1) write(*,*) "Receiving a field"
+            if (.not. is_first_data_point) call io_timer%start()
+            call io_timer%start()
+            call xios_recv_field(finfo%get_field_name(ifile,ifield), inpdata)
+            if (.not. is_first_data_point) call io_timer%stop()
+
+            if ( is_first_data_point) is_first_data_point=.false.
+
+            !call sleep(1)
+            !call mpi_barrier(pinfo%comm,ierr )
+            
+            if (finfo%check .eqv. .true. ) then 
+              if (finfo%log >=1) write(*,*) "Checking a field"  
+              call check_data( inpdata, pinfo)
+            endif
+            
+          endif
+
+          
+
+        enddo
       
-      do ifield=1,finfo%get_nfields()
-        if (finfo%log >=1) write(*,*) "Generating a field"
-
-        
-        if (finfo%operation == "write") then 
-          if (finfo%log >=1) write(*,*) "Sending a field"
-          !write(*,*) rank,": ",pinfo%ibegin_global
-
-          do ilevel=1,pinfo%n_local
-            inpdata(ilevel)= mod( ilevel *1d0 + pinfo%ibegin_global + finfo%nelements*(ifield-1) ,max_integer )
-          end do
-          
-          call io_timer%start()
-          call xios_send_field(finfo%get_field_name(ifield), inpdata)
-          call io_timer%stop()
-          
-        else if (finfo%operation == "read") then
-          
-          if (finfo%log >=1) write(*,*) "Receiving a field"
-          call io_timer%start()
-          call xios_recv_field(finfo%get_field_name(ifield), inpdata)
-          call io_timer%stop()
-          
-          if (finfo%check .eqv. .true. ) then 
-            if (finfo%log >=1) write(*,*) "Checking read data"
-            do ilevel=1,pinfo%n_local
-              !inpdata(ilevel)=
-              if ( abs( inpdata(ilevel) - mod(ilevel*1d0 + pinfo%ibegin_global + & 
-                finfo%nelements*(ifield-1) , max_integer  ) )> 1e-5 ) then 
-                write(*,*) "Error at level" , ilevel,". Expected ", &
-                mod(ilevel*1d0 + pinfo%ibegin_global + finfo%nelements*(ifield-1),max_integer)  , ", got " &
-                ,inpdata(ilevel), "at rank " , rank
-                !call mpi_abort(MPI_COMM_WORLD,-1,ierr)
-              endif        
-            enddo
-          endif 
-        endif
       enddo
-
 
       deallocate (inpdata)
       
@@ -386,6 +525,8 @@ module partition_mod
       if (rank .eq. 0) then 
          write(*,*) "Time elapsed: ", elapsed
       endif
+      
+      !call sleep(10)
     end subroutine simulate
 
   end program resample

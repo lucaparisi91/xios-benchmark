@@ -3,23 +3,36 @@
     <axis_definition>
       <axis id="pressure_levels1" positive="down" long_name="Air Pressure" standard_name="air_pressure" unit="Pa" n_glo="10" >
       </axis>
+      <axis id="panel" positive="down" long_name="Time" standard_name="time" unit="h" n_glo="70" >
+      </axis>
+      
     </axis_definition>
     
     <grid_definition>
       <grid id="model">
         <axis axis_ref="pressure_levels1" />
+        <domain id="horizontal_domain" type="rectilinear" >
+        <generate_rectilinear_domain/>
+        </domain>
+        <axis axis_ref="panel" />
       </grid>
+    
     </grid_definition>
     
+
     <field_definition freq_op="1ts"  enabled=".TRUE." operation="instant" >
       <field id="pressure" name="pressure" long_name="Air Pressure" standard_name="air_pressure" unit="Pa" grid_ref="model" />
     </field_definition>
   
-    
-  <file_definition type="one_file" >
-    <file id="axis_output" name="axis" >
 
-    </file> 
+  <file_definition type="one_file" >
+
+    <file_group id="output_files">
+      <!-- <file id="axis_output" name="/work/n02/n02/lparisin02/wp2/synthetic_io_benchmarks/write_1D/axis" >
+
+      </file>  -->
+    </file_group>
+  
   </file_definition>
   
 </context>
