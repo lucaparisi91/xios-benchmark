@@ -3,12 +3,12 @@
 # Slurm job options (name, compute nodes, job time)
 #SBATCH --job-name=xios_bench
 #SBATCH --time=0:20:00
-#SBATCH --nodes=21
+#SBATCH --nodes=70
 #SBATCH --tasks-per-node=288
 #SBATCH --cpus-per-task=1
 #SBATCH --account=z04
 #SBATCH --partition=standard
-#SBATCH --qos=standard
+#SBATCH --qos=largescale
 #SBATCH --exclusive
 
 module load PrgEnv-gnu
@@ -26,18 +26,12 @@ XIOS_DIR="xios-3"
 
 SERVER_EXE="../${XIOS_DIR}/bin/xios_server.exe"
 BENCH_EXE="./xios-bench-${XIOS_DIR}"
-#export FI_LOG_LEVEL=Debug
+export FI_LOG_LEVEL=Debug
 module load spack 
 spack env activate ../environments/xios3_dev
 spack load hpctoolkit
 
-#export LD_LIBRARY_PATH=/work/z04/z04/shared/lparisi/queries/opt/libfabric-1.22.0-v2/lib:$LD_LIBRARY_PATH
-
-#LAUNCHER= hpcrun -t -o hpctoolkit-$XIOS_DIR-trace
-
-rm -f output/*.nc
-
-LAUNCHER=""
+export LD_LIBRARY_PATH=/work/z04/z04/shared/lparisi/queries/opt/libfabric-1.22.0-v2/lib:$LD_LIBRARY_PATH
 
 
-srun  --hint=nomultithread --nodes=17 --ntasks=4704 --distribution=block:block --unbuffered $LAUNCHER $BENCH_EXE :  --nodes=4 --ntasks=16 --cpus-per-task=72  --distribution=block:block --hint=nomultithread $LAUNCHER ${SERVER_EXE}
+srun  --hint=nomultithread --nodes=66 --ntasks=18816 --distribution=block:block --unbuffered  $BENCH_EXE :  --nodes=4 --ntasks=16 --cpus-per-task=72  --distribution=block:block --hint=nomultithread  ${SERVER_EXE}

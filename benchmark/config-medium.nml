@@ -1,13 +1,14 @@
 &info
 n_proc=1,28,28,6
 shape=70,896,896,6
-nfields=4
+nfields=1,
 field_base_name="data4D",
 file_name="axis",
 operation="write",
-check=.false.,
+check=.true.,
 par_access="collective",
 log=1,
 nfiles=1,
 warmup_operations=0
 /
+

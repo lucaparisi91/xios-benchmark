@@ -23,18 +23,9 @@ module timer_mod
     procedure, public :: elapsed
   end type
 
-  interface timer
-    module procedure :: constructor
-  end interface
 
   contains
 
-  function constructor(comm) result(new_timer)
-    integer,intent(in) :: comm
-    type(timer) :: new_timer
-
-    new_timer%comm=comm
-  end function
 
 
   subroutine start(this)
@@ -44,12 +35,11 @@ module timer_mod
     
   end subroutine
 
-  function elapsed(this) result(elapsed_time_max)
-    class(timer) :: this
-    double precision :: elapsed_time_max
-    integer :: ierr
-    
-    call MPI_Allreduce(this%elapsed_time,elapsed_time_max,1,MPI_DOUBLE,MPI_MAX,this%comm,ierr)
+  function elapsed(this) result(elapsed_time)
+    class(timer),intent(in) :: this
+    real(kind=dp) :: elapsed_time
+
+    elapsed_time=this%elapsed_time
 
 
   end function
@@ -158,6 +148,8 @@ module partition_mod
       character(len=max_characters) :: par_access
       logical :: check
       integer :: log
+      integer :: warmup_operations
+
     contains
         procedure,public :: get_field_name
         procedure,public :: init
@@ -186,8 +178,9 @@ module partition_mod
       integer :: n_proc(4)
       integer :: shape(4)
       integer :: nfiles
+      integer :: warmup_operations=0
 
-      namelist /info/nelements,nfields,field_base_name,file_name,operation,check,log,par_access,n_proc,shape,nfiles
+      namelist /info/nelements,nfields,field_base_name,file_name,operation,check,log,par_access,n_proc,shape,nfiles,warmup_operations
       
       open(newunit=io, file=file_name_list,action="read")
       read(unit=io,nml=info)
@@ -204,7 +197,7 @@ module partition_mod
       this%n_proc=n_proc
       this%shape=shape
       this%nfiles = nfiles
-
+      this%warmup_operations = warmup_operations
     end subroutine
 
     function get_nfields(this) result(nfields)
@@ -257,6 +250,7 @@ module partition_mod
     use mpi
     use partition_mod
     use file_info_mod, only : file_info,max_characters
+    use timer_mod, only : timer
     implicit none
     
   
@@ -265,15 +259,30 @@ module partition_mod
     integer :: wNranks  
     type(partition_info) :: pinfo 
     type(file_info) :: finfo 
-
+    type(timer) :: timer_initalise
+    type(timer) :: timer_finalise
   
     call MPI_INIT(ierr)
+    
     call MPI_Comm_rank(MPI_COMM_WORLD, wRank, ierr)
     call MPI_Comm_size(MPI_COMM_WORLD, wNranks,ierr)
-    
+
+    call timer_initalise%start()
     call initialise(pinfo,finfo)
+    call timer_initalise%stop()
+
     call simulate(pinfo,finfo)
+    call timer_finalise%start()
     call finalise()
+    call timer_finalise%stop()
+
+    if (wrank .eq. 0) then 
+      write(*,*) "Initialise: ", timer_initalise%elapsed()
+      write(*,*) "Finalise: ", timer_finalise%elapsed()
+      
+    endif
+      
+
     
     call MPI_Finalize(ierr)
   
@@ -297,7 +306,7 @@ module partition_mod
       integer :: npar = 0
       integer :: mpi_error
       integer :: nfields = 1
-      character(len = max_characters) :: field_name
+      character(len = max_characters) :: field_name,axis_name
       integer :: i
 
       ! Arbitrary datetime setup, required for XIOS but unused
@@ -322,7 +331,8 @@ module partition_mod
 
 
       call create_partition(finfo%shape,finfo%n_proc,comm,pinfo) ! distribute levels in the field across clients and save distribution info in pinfo
-      call xios_set_axis_attr("pressure_levels1",n_glo=pinfo%n_global(1),begin=pinfo%ibegin_global(1),n=pinfo%n_local(1))
+      axis_name="pressure_levels1"
+      call xios_set_axis_attr(axis_name,n_glo=pinfo%n_global(1),begin=pinfo%ibegin_global(1),n=pinfo%n_local(1))
       call xios_set_axis_attr("panel",n_glo=pinfo%n_global(4),begin=pinfo%ibegin_global(4),n=pinfo%n_local(4) )
 
       call xios_set_domain_attr("horizontal_domain", &
@@ -459,8 +469,7 @@ module partition_mod
       double precision, dimension (:,:,:,:), allocatable :: inpdata
       double precision , parameter:: max_integer = 1000000
 
-      is_first_data_point=.true.
-      io_timer = timer(pinfo%comm)
+      
       call MPI_Comm_rank(pinfo%comm,rank,ierr)
       
       allocate ( inpdata(pinfo%n_local(1) , pinfo%n_local(2),pinfo%n_local(3),pinfo%n_local(4)) )
@@ -478,24 +487,24 @@ module partition_mod
       do ifile=1,finfo%nfiles
 
         do ifield=1,finfo%get_nfields()
-          if (finfo%log >=1) write(*,*) "Generating a field"
+          if (finfo%log >=1 .and. rank==0) write(*,*) "Generating a field"
           
           
           if (finfo%operation == "write") then 
-            if (finfo%log >=1) write(*,*) "Sending a field"
+            if (finfo%log >=1 .and. rank == 0) write(*,*) "Sending a field"
             !write(*,*) rank,": ",pinfo%ibegin_global
-
+            
             call set_data( inpdata, pinfo)
-            if (.not. is_first_data_point) call io_timer%start()
+            if ( ifield > finfo%warmup_operations ) call io_timer%start()
             call xios_send_field(finfo%get_field_name(ifile,ifield), inpdata)
-            if (.not. is_first_data_point) call io_timer%stop()
-
+            if ( ifield > finfo%warmup_operations ) call io_timer%stop()
+            
           
             if ( is_first_data_point) is_first_data_point=.false.
 
           else if (finfo%operation == "read") then
             
-            if (finfo%log >=1) write(*,*) "Receiving a field"
+            if (finfo%log >=1 .and. rank==0) write(*,*) "Receiving a field"
             if (.not. is_first_data_point) call io_timer%start()
             call io_timer%start()
             call xios_recv_field(finfo%get_field_name(ifile,ifield), inpdata)
@@ -523,7 +532,7 @@ module partition_mod
       
       elapsed = io_timer%elapsed()
       if (rank .eq. 0) then 
-         write(*,*) "Time elapsed: ", elapsed
+         write(*,*) "Time send/recv: ", elapsed
       endif
       
       !call sleep(10)

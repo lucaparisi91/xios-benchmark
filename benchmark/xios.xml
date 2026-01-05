@@ -5,6 +5,9 @@
 	performance
       </variable>
       <variable id="buffer_size_factor" type="double">
+      <variable id="min_buffer_size" type="int">
+  2097152
+      </variable>
 	1.0
       </variable>
     </variable_group>
@@ -12,13 +15,12 @@
     <variable_group id="parameters" >
        <variable id="using_server" type="bool">true</variable>
         <variable id="using_server2" type="bool">false</variable>
-
-       <variable id="info_level" type="int">
-	0
-      </variable>
-      <variable id="print_file" type="bool">
-	true
-      </variable>
+        <variable id = "services_use_window_manager" type="bool">false</variable>
+       <variable id="transport_protocol" type="string" >p2p</variable> 
+       <variable id="info_level" type="int"> 1 </variable>
+      <variable id="print_file" type="bool"> true </variable>
     </variable_group>
   </variable_definition>
 </context>
+
+
