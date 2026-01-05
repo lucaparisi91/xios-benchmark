@@ -1,0 +1,21 @@
+# This is a Spack Environment file.
+#
+# It describes a set of packages to be installed, along with
+# configuration settings.
+
+spack:
+  specs:
+  - subversion %gcc_all
+  - hpctoolkit %gcc_all
+  - darshan-runtime
+  - darshan-util
+  concretizer:
+    unify: false
+    splice:
+      automatic: false
+  config:
+    install_tree:
+      root: /mnt/lustre/e1000/home/z04/shared/lparisi/software-cirrus-ex/spack-cirrus-ex/queries/opt
+      padding_length: 120
+
+  view: false
