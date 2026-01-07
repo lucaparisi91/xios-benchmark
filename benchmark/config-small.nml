@@ -1,6 +1,6 @@
 &info
-n_proc=1,2,2,1
-shape=1,4,4,1
+n_proc=1,4,4,1
+shape=60,40,40,1
 nfields=1,
 field_base_name="data4D",
 file_name="axis",

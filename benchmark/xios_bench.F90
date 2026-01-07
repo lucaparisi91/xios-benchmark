@@ -329,9 +329,9 @@ module partition_mod
       call xios_set_start_date(start)
       call xios_set_timestep(tstep)
 
-
+      
       call create_partition(finfo%shape,finfo%n_proc,comm,pinfo) ! distribute levels in the field across clients and save distribution info in pinfo
-      axis_name="pressure_levels1"
+      axis_name="levels"
       call xios_set_axis_attr(axis_name,n_glo=pinfo%n_global(1),begin=pinfo%ibegin_global(1),n=pinfo%n_local(1))
       call xios_set_axis_attr("panel",n_glo=pinfo%n_global(4),begin=pinfo%ibegin_global(4),n=pinfo%n_local(4) )
 

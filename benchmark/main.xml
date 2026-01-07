@@ -1,7 +1,7 @@
 <context>
   <calendar type="Gregorian"/>
     <axis_definition>
-      <axis id="pressure_levels1" positive="down" long_name="Air Pressure" standard_name="air_pressure" unit="Pa" n_glo="10" >
+      <axis id="levels" positive="down" long_name="Air Pressure" standard_name="air_pressure" unit="Pa" n_glo="10" >
       </axis>
       <axis id="panel" positive="down" long_name="Time" standard_name="time" unit="h" n_glo="70" >
       </axis>
@@ -10,7 +10,7 @@
     
     <grid_definition>
       <grid id="model">
-        <axis axis_ref="pressure_levels1" />
+        <axis axis_ref="levels" />
         <domain id="horizontal_domain" type="rectilinear" >
         <generate_rectilinear_domain/>
         </domain>
