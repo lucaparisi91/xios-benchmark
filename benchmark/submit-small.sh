@@ -37,8 +37,8 @@ spack load hpctoolkit
 #export LD_LIBRARY_PATH=/work/z04/z04/shared/lparisi/queries/opt/libfabric-1.22.0-v2/lib:$LD_LIBRARY_PATH
 
 set -x
-LAUNCHER="hpcrun -e context-switches -o hpctoolkit-$XIOS_DIR-ctx-switches"
-#LAUNCHER=""
+#LAUNCHER="hpcrun -e context-switches -o hpctoolkit-$XIOS_DIR-ctx-switches"
+LAUNCHER=""
 
 rm -f *.nc
 

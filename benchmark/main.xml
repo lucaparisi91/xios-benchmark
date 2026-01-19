@@ -10,10 +10,10 @@
     
     <grid_definition>
       <grid id="model">
-        <axis axis_ref="levels" />
         <domain id="horizontal_domain" type="rectilinear" >
         <generate_rectilinear_domain/>
         </domain>
+        <axis axis_ref="levels" />
         <axis axis_ref="panel" />
       </grid>
     
