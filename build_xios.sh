@@ -5,6 +5,7 @@ OPT="dev"
 COMPILER="GNU"
 DOWNLOAD=0
 BRANCH="main"
+CLEAN=1
 
 # load compiler specific modules
 set +x # Disable command echoing to limit noise 
@@ -33,6 +34,16 @@ then
 fi
 
 
+
 # Build XIOS
 cd $XIOS_DIR
+
+if [ $CLEAN -eq 1 ];
+then
+    # Clean previous builds
+    rm -rf ./obj 
+    rm -rf ./bin
+    rm -rf ./lib
+fi
+
 ./make_xios --$OPT --arch GCC_CRAY_EX4000 --job 16
