@@ -1,0 +1,42 @@
+#!Jinja2
+
+[scheduler]
+    allow implicit tasks = True
+
+
+[task parameters]
+    nfields = 1
+    operation = write    
+
+[scheduling]
+    [[graph]]
+        R1 = """
+            xios_benchmark<nfields,operation>
+        """
+
+[runtime]
+
+    [[ xios_benchmark<nfields,operation> ]]
+        
+        platform = cirrus
+        script = """
+                module load cray-python
+
+                OUTPUT_FOLDER=$CYLC_TASK_SHARE_CYCLE_DIR/$CYLC_TASK_JOB
+                mkdir -p $OUTPUT_FOLDER
+
+                # Generate xios benchmark input namelist file
+                python ${CYLC_RUN_DIR}/${CYLC_WORKFLOW_ID}/generate_config.py \
+                                         --nfields ${CYLC_TASK_PARAM_nfields} \
+                                         --operation ${CYLC_TASK_PARAM_operation} \
+                                         --output config.nml
+            """
+        [[[directives]]]
+            --nodes = 1
+            --ntasks-per-node = 1
+            --cpus-per-task = 288
+            --time = 00:20:00
+            --partition = standard
+            --account = z19
+            --qos = standard
+            --exclusive = 
