@@ -1,0 +1,23 @@
+[platforms]
+    [[localhost]]
+        hosts = localhost
+        install target = localhost
+        global init-script = """
+            export CYLC_RUN_DIR=/work/z19/shared/lparisi/xios-benchmark/runs/cylc-run
+            source /work/z19/shared/lparisi/xios-benchmark/benchmark/cylc_env/bin/activate
+            export HOME=/work/z19/shared/lparisi/xios-benchmark/runs
+        """
+    [[cirrus]]
+        hosts = localhost
+        job runner = slurm
+        install target = localhost
+        global init-script = """
+            export CYLC_RUN_DIR=/work/z19/shared/lparisi/xios-benchmark/runs/cylc-run
+            source /work/z19/shared/lparisi/xios-benchmark/benchmark/cylc_env/bin/activate
+            export HOME=/work/z19/shared/lparisi/xios-benchmark/runs
+        """
+
+[install]
+    [[symlink dirs]]
+        [[[localhost]]]
+            run = /work/z19/shared/lparisi/xios-benchmark/runs

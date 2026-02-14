@@ -4,8 +4,8 @@ import copy
 def get_default_namelist():
     nml_default = {
         "info": {
-            "n_proc": [1, 28, 28, 6],
-            "shape": [70, 896, 896, 6],
+            "n_proc": [1, 2, 2, 1],
+            "shape": [70, 40, 40, 6],
             "nfields": 4,
             "field_base_name": "data4D",
             "file_name": "data/axis",

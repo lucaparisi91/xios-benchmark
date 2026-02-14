@@ -2,41 +2,90 @@
 
 [scheduler]
     allow implicit tasks = True
-
-
-[task parameters]
-    nfields = 1
-    operation = write    
+    {% set parameters= {
+        "nfields": [1],
+        "operation": ['write'],
+        "io_servers": [1 ] 
+                        } 
+    %}
 
 [scheduling]
     [[graph]]
+
+        # Iterate over all combinations of parameters to create tasks
+        {% for nfields in parameters.nfields %}
+            {% for operation in parameters.operation %}
+                {% for io_servers in parameters.io_servers %}
         R1 = """
-            xios_benchmark<nfields,operation>
+            xios_benchmark_nfields{{nfields}}_operation{{operation}}_io_servers{{io_servers}}
         """
+        {% endfor %}
+            {% endfor %}
+        {% endfor %}
 
 [runtime]
 
-    [[ xios_benchmark<nfields,operation> ]]
-        
+    # Loop over all combinations of parameters to create tasks
+    {% for nfields in parameters.nfields %}
+        {% for operation in parameters.operation %}
+            {% for io_servers in parameters.io_servers %}
+    [[ xios_benchmark_nfields{{nfields}}_operation{{operation}}_io_servers{{io_servers}} ]]
         platform = cirrus
         script = """
-                module load cray-python
 
-                OUTPUT_FOLDER=$CYLC_TASK_SHARE_CYCLE_DIR/$CYLC_TASK_JOB
-                mkdir -p $OUTPUT_FOLDER
+                module load PrgEnv-gnu
+                module load cray-hdf5-parallel
+                module load cray-netcdf-hdf5parallel
+                module load xthi
 
                 # Generate xios benchmark input namelist file
                 python ${CYLC_RUN_DIR}/${CYLC_WORKFLOW_ID}/generate_config.py \
-                                         --nfields ${CYLC_TASK_PARAM_nfields} \
-                                         --operation ${CYLC_TASK_PARAM_operation} \
+                                         --nfields {{nfields}} \
+                                         --operation {{operation}} \
                                          --output config.nml
-            """
+                
+                
+                # Set the executable paths for the server and benchmark
+                XIOS_DIR="xios-3" # Branch on the xios repository
+                XIOS_ROOT="/work/z19/shared/lparisi/xios-benchmark" # Root of the xios installation and benchmark
+                SERVER_EXE="${XIOS_ROOT}/${XIOS_DIR}/bin/xios_server.exe"
+                BENCH_EXE="${XIOS_ROOT}/benchmark/xios-bench-${XIOS_DIR}"
+
+                export OMP_NUM_THREADS=1
+                export SRUN_CPUS_PER_TASK=$SLURM_CPUS_PER_TASK
+
+                # Libfabric tuning for Slingshot 11
+                export FI_CXI_RX_MATCH_MODE=hybrid
+                export FI_CXI_OPTIMIZED_MRS=false
+                export FI_CXI_DEFAULT_CQ_SIZE=1048576
+
+                # Create a striped directory where to create the data
+                mkdir -p data
+                lfs setstripe -c -1 -p flash data
+
+                # Copy input files from the cylc run directory to the current working directory
+                cp ${CYLC_RUN_DIR}/${CYLC_WORKFLOW_ID}/xml_config/* .
+                
+                LAUNCHER=""
+
+                OUTPUT_DIR="${CYLC_WORKFLOW_SHARE_DIR}/${CYLC_TASK_NAME}"
+                mkdir -p $OUTPUT_DIR
+                cp config.nml $OUTPUT_DIR
+
+                srun --nodes=1 --tasks=4 --cpus-per-task=1 --hint=nomultithread --distribution=block:block --output $OUTPUT_DIR/xios.out $LAUNCHER $BENCH_EXE  :  --nodes=1 --ntasks=16 --cpus-per-task=1  --distribution=block:block --hint=nomultithread $LAUNCHER ${SERVER_EXE}
+
+
+
+                """
         [[[directives]]]
-            --nodes = 1
-            --ntasks-per-node = 1
-            --cpus-per-task = 288
+            --nodes = 2
+            --ntasks-per-node = 16
+            --cpus-per-task = 1
             --time = 00:20:00
             --partition = standard
             --account = z19
             --qos = standard
             --exclusive = 
+            {% endfor %}
+        {% endfor %}
+    {% endfor %}
