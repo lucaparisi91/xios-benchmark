@@ -1,5 +1,8 @@
+import sys
 import pandas as pd
 import re
+import argparse
+
 
 def extract_performance_xios_output(xios_output_file) -> pd.DataFrame :
     """ Extract performance metrics from the xios output file.
@@ -27,20 +30,14 @@ def extract_performance_xios_output(xios_output_file) -> pd.DataFrame :
     return pd.DataFrame(data)
 
 if __name__ == "__main__":
-    import argparse
+    
     parser = argparse.ArgumentParser(description="Extract performance metrics from xios output file")
     parser.add_argument("xios_output_file", type=str, help="Path to the xios output file")
-    parser.add_argument("--keys", type=str, nargs="*", default=[], help="List of keys to add as columns to the output dataframe")
-    parser.add_argument("--values", type=str, nargs="*", default=[], help="List of values to add as columns to the output dataframe")
-    
-    
+    parser.add_argument("--output_file", type=str, default=sys.stdout, help="Path to the output data file (dsv format)")
     args = parser.parse_args()
-
-    assert len(args.keys) == len(args.values), "The number of keys and values must be the same"
     
     with open(args.xios_output_file, "r") as f:
         df = extract_performance_xios_output(f)
 
-        for key, value in zip(args.keys, args.values):
-            df[key] = value
-        print(df)
+        
+        df.to_csv(args.output_file, sep=" ", index=False)
