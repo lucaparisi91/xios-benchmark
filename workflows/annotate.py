@@ -22,17 +22,25 @@ def annotate_dataframe(data, keys, values):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Annotate a dataframe by adding new columns with the same value for all rows")
-    parser.add_argument("data_file", type=str, help="Path to the input data file (dsv format)")
+    parser.add_argument("data_files", type=str, nargs="+", help="Path to the input data files (dsv format)")
     parser.add_argument("--keys", type=str, nargs="+", help="Names of the columns to add")
     parser.add_argument("--values", type=str, nargs="+", help="Values for the new columns")
     parser.add_argument("--output_file", type=str, default=sys.stdout, help="Path to the output data file (dsv format)")
 
     args = parser.parse_args()
-    data = pd.read_csv(args.data_file, sep=r"\s+")
-    
-    if args.keys and args.values:
         
-        annotated_data = annotate_dataframe(data, args.keys, args.values)
-    else:
-        annotated_data = data
-    annotated_data.to_csv(args.output_file, sep=" ", index=False)
+    annotated_dataframes = []
+
+    for file in args.data_files:
+        data = pd.read_csv(file, sep=r"\s+")
+       
+
+        if args.keys and args.values:
+            
+            annotated_data = annotate_dataframe(data, args.keys, args.values)
+        else:
+            annotated_data = data
+        annotated_dataframes.append(annotated_data)
+    
+    final_dataframe = pd.concat(annotated_dataframes, ignore_index=True)
+    final_dataframe.to_csv(args.output_file, index=False, sep=" ")
