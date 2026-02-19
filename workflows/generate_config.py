@@ -31,14 +31,17 @@ if __name__ == "__main__":
     parser.add_argument('--operation', type=str, default="read", help='Operation to perform (read/write)')
     parser.add_argument('--output', type=str, default=sys.stdout, help='Output namelist file name')
     parser.add_argument('--client_processes', type=int, default=6, help='Number of client processes')
+    parser.add_argument("--file_name",type=str, default="data/axis", help="Base name for the generated files.")
     
+
     args = parser.parse_args()
     
     # Update the default namelist with the provided arguments
     nml = get_default_namelist()
     nml["info"]["nfields"] = args.nfields
     nml["info"]["operation"] = args.operation
-
+    nml["info"]["file_name"] = args.file_name
+    
     # Calculate the optimal decomposition for the given number of client processes
 
     shape=nml["info"]["shape"]

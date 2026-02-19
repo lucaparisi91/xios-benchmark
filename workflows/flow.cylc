@@ -3,186 +3,203 @@
 
 [scheduler]
     allow implicit tasks = True
+
+    {% set experiment_name = "xios2_xios3_comparision" %}
+
     # Matrix of parameters. A task will be created for each combination of parameters.
     {% set parameters= {
-        "nfields": [1],
+        "nfields": [1,4,8,16,32],
         "operation": ['write'],
-        "io_nodes": [1] ,
-        "client_nodes": [1],
-        "servers_per_node": [16],
+        "ioNodes": [1,4,8] ,
+        "clientNodes": [1,8,16],
+        "serversPerNode": [1,8,12],
+        "xiosVersion": ["xios-2","xios-3"]
                         }
     %}
 
 
+    # Result directory
+    {%
+        set results_dir = "/work/z19/shared/lparisi/xios-benchmark/results/"~experiment_name
+    %}
+
     # Machine Parameters
     {%
-        set cores_per_node = 288
+        set coresPerNode = 288
     %}
 
     # Number of times to repeat each experiment (to get an estimate of variability)
     {%
         set repeats = 1
     %}
-
+    
     # Profiler to use. Allowed values: "darshan" or "none"
     {%
-        set profiler = "darshan" 
+        set profiler = "darshan"
     %}
 
     {%
         set darshan_modules="DXT_POSIX,DXT_MPIIO"
     %}
 
+    {%
+        set pool = "flash"
+    %}
+
+    {%
+        set stripes = -1
+    %}
+
+
+    {% from "expand_combinations" import expand_combinations, get_label %}
+    {% set combinations = expand_combinations(parameters) %}
 
 [scheduling]
-
+    [[queues]]
+        [[[default]]]
+            limit = 3
     [[graph]]
 
-        # Iterate over all combinations of parameters to create tasks
-        {% for nfields in parameters.nfields %}
-            {% for operation in parameters.operation %}
-                {% for io_nodes in parameters.io_nodes %}
-                {% for client_nodes in parameters.client_nodes %}
-                    {% for servers_per_node in parameters.servers_per_node %}
-                        {% for repeat in range(repeats) %}
-        
-        R1 = """
-            xios_benchmark_nfields_{{nfields}}_operation_{{operation}}_io_nodes_{{io_nodes}}_servers_per_node_{{servers_per_node}}_client_nodes_{{client_nodes}}_repeat_{{repeat}} => analysis_xios_benchmark_nfields_{{nfields}}_operation_{{operation}}_io_nodes_{{io_nodes}}_servers_per_node_{{servers_per_node}}_client_nodes_{{client_nodes}}_repeat_{{repeat}}
-            XIOS_BENCHMARK:succeed-all => collect_results
-            
+
+        {% for combination in combinations %}
+        R1= """
+
+            xios_benchmark_{{get_label(combination)}} => analysis_xios_benchmark_{{get_label(combination)}}
+            XIOS_BENCHMARK:succeed-all    => collect_results
         """
         {% endfor %}
-            {% endfor %}
-                {% endfor %}
-                    {% endfor %}
-                        {% endfor %}
-                            {% endfor %}
 
 [runtime]
-    
+
     [[XIOS_BENCHMARK]]
     
-    # Loop over all combinations of parameters to create tasks
-    {% for nfields in parameters.nfields %}
-        {% for operation in parameters.operation %}
-            {% for io_nodes in parameters.io_nodes %}
-                {% for servers_per_node in parameters.servers_per_node %}
-                     {% for client_nodes in parameters.client_nodes %}
-                    {% for repeat in range(repeats) %}
-                        {% set parameter_combination = "nfields_{}_operation_{}_io_nodes_{}_servers_per_node_{}_client_nodes_{}_repeat_{}".format(nfields, operation, io_nodes, servers_per_node, client_nodes, repeat) %}
-    
-            [[ xios_benchmark_{{ parameter_combination }} ]]
-                inherit = XIOS_BENCHMARK
-                platform = cirrus
-                script = """
-
-                        module load PrgEnv-gnu
-                        module load cray-hdf5-parallel
-                        module load cray-netcdf-hdf5parallel
-                        module load xthi
-
-                        # Generate xios benchmark input namelist file
-                        python ${CYLC_RUN_DIR}/${CYLC_WORKFLOW_ID}/generate_config.py \
-                                                --nfields {{nfields}} \
-                                                --operation {{operation}} \
-                                                --client_processes {{ client_nodes * cores_per_node }} \
-                                                --output config.nml
-                        
-                        
-                        # Set the executable paths for the server and benchmark
-                        XIOS_DIR="xios-3" # Branch on the xios repository
-                        XIOS_ROOT="/work/z19/shared/lparisi/xios-benchmark" # Root of the xios installation and benchmark
-                        SERVER_EXE="${XIOS_ROOT}/${XIOS_DIR}/bin/xios_server.exe"
-                        BENCH_EXE="${XIOS_ROOT}/benchmark/xios-bench-${XIOS_DIR}"
-
-                        export OMP_NUM_THREADS=1
-                        export SRUN_CPUS_PER_TASK=$SLURM_CPUS_PER_TASK
-
-                        # Libfabric tuning for Slingshot 11
-                        export FI_CXI_RX_MATCH_MODE=hybrid
-                        export FI_CXI_OPTIMIZED_MRS=false
-                        export FI_CXI_DEFAULT_CQ_SIZE=1048576
-
-                        # Create a striped directory where to create the data
-                        mkdir -p data
-                        lfs setstripe -c -1 -p flash data
-
-                        # Copy input files from the cylc run directory to the current working directory
-                        cp ${CYLC_RUN_DIR}/${CYLC_WORKFLOW_ID}/xml_config/* .
-                        
-    
-                        
-                        LAUNCHER=""
-
-                        OUTPUT_DIR="${CYLC_WORKFLOW_SHARE_DIR}/${CYLC_TASK_NAME}"
-                        mkdir -p $OUTPUT_DIR
-                        cp config.nml $OUTPUT_DIR
-                        {% if profiler == "darshan" %}
-
-                            # Enable Darshan profiling
-
-                            DARSHAN_ROOT="/work/z19/z19/lparisi/.spack-1.0.2-0.2/opt/spack/linux-rhel9-zen5/gcc-14.2/darshan-runtime-3.4.7-gieovdhpiu3vktqmxgdcieimypniit4i"
-                            export DARSHAN_MOD_ENABLE={{darshan_modules}}
-                            export SRUN_EXPORT_ENV="ALL,LD_PRELOAD=$DARSHAN_ROOT/lib/libdarshan.so"
-                            export DARSHAN_LOG_DIR_PATH=$OUTPUT_DIR/logs
-                            mkdir -p $DARSHAN_LOG_DIR_PATH
-                        {% endif %}
-                        
-
-                        srun --nodes={{client_nodes}} --tasks={{ client_nodes * cores_per_node }} --cpus-per-task=1 --hint=nomultithread --distribution=block:block --output $OUTPUT_DIR/xios.out $LAUNCHER $BENCH_EXE  :  --nodes={{ io_nodes }} --ntasks={{ servers_per_node * io_nodes }} --cpus-per-task=1  --distribution=block:block --hint=nomultithread $LAUNCHER ${SERVER_EXE}
-
-                        """
-                [[[directives]]]
-                    --nodes = {{ io_nodes + client_nodes }}
-                    --ntasks-per-node = {{ cores_per_node }}
-                    --cpus-per-task = 1
-                    --time = 00:20:00
-                    --partition = standard
-                    --account = z19
-                    --qos = standard
-                    --exclusive = 
+            {% for combination in combinations %}
                 
-                [[analysis_xios_benchmark_{{ parameter_combination }} ]]
+                [[ xios_benchmark_{{ get_label(combination) }} ]]
+                    inherit = XIOS_BENCHMARK
+                    platform = cirrus
+                    script = """
+
+                            # Create a striped directory where to create the data
+
+                            DATA_DIR="{{ results_dir}}/data/xios_benchmark_{{ get_label(combination)  | replace("read", "write") }}"
+                            mkdir -p $DATA_DIR
+                            lfs setstripe -c {{ stripes }} \
+                                {%if pool != "none" %}
+                                -p {{pool}} \ 
+                                {% endif %} $DATA_DIR
+
+                            module load PrgEnv-gnu
+                            module load cray-hdf5-parallel
+                            module load cray-netcdf-hdf5parallel
+                            module load xthi
+
+                            rm -f config.nml # Necessay for restarts of failed jobs, to avoid conflicts with the config.nml generated by the previous run
+                            # Generate xios benchmark input namelist file
+                            python ${CYLC_RUN_DIR}/${CYLC_WORKFLOW_ID}/generate_config.py \
+                                                    --nfields {{combination.nfields}} \
+                                                    --operation {{combination.operation}} \
+                                                    --client_processes {{ combination.clientNodes * coresPerNode }} \
+                                                    --file_name ${DATA_DIR}/axis \
+                                                    --output config.nml
+                            
+                            
+                            # Set the executable paths for the server and benchmark
+                            XIOS_DIR="{{combination.xiosVersion}}" # Branch on the xios repository
+                            XIOS_ROOT="/work/z19/shared/lparisi/xios-benchmark" # Root of the xios installation and benchmark
+                            SERVER_EXE="${XIOS_ROOT}/${XIOS_DIR}/bin/xios_server.exe"
+                            BENCH_EXE="${XIOS_ROOT}/benchmark/xios-bench-${XIOS_DIR}"
+
+                            export OMP_NUM_THREADS=1
+                            export SRUN_CPUS_PER_TASK=$SLURM_CPUS_PER_TASK
+
+                            # Libfabric tuning for Slingshot 11
+                            export FI_CXI_RX_MATCH_MODE=hybrid
+                            export FI_CXI_OPTIMIZED_MRS=false
+                            export FI_CXI_DEFAULT_CQ_SIZE=1048576
+
+                            # Copy input files from the cylc run directory to the current working directory
+                            cp ${CYLC_RUN_DIR}/${CYLC_WORKFLOW_ID}/xml_config/$XIOS_DIR/* .
+                            
+        
+                            
+                            LAUNCHER=""
+                            
+                            OUTPUT_DIR="{{ results_dir }}/${CYLC_TASK_NAME}"
+                            mkdir -p $OUTPUT_DIR
+                            cp config.nml $OUTPUT_DIR
+                            
+                            {% if profiler == "darshan" %}
+
+                                # Enable Darshan profiling
+                                DARSHAN_ROOT="/work/z19/z19/lparisi/.spack-1.0.2-0.2/opt/spack/linux-rhel9-zen5/gcc-14.2/darshan-runtime-3.4.7-gieovdhpiu3vktqmxgdcieimypniit4i"
+                                export DARSHAN_MOD_ENABLE={{darshan_modules}}
+                                export SRUN_EXPORT_ENV="ALL,LD_PRELOAD=$DARSHAN_ROOT/lib/libdarshan.so"
+                                export DARSHAN_LOG_DIR_PATH=$OUTPUT_DIR/logs
+                                mkdir -p $DARSHAN_LOG_DIR_PATH
+                            {% endif %}
+
+
+                            # Save parameters to the output directory for later analysis
+                            python ${CYLC_RUN_DIR}/${CYLC_WORKFLOW_ID}/annotate.py \
+                                --keys nfields operation io_nodes servers_per_node client_nodes xios_version \
+                                --values {{combination.nfields}} {{combination.operation}} {{combination.ioNodes}} {{combination.serversPerNode}} {{combination.clientNodes}} {{combination.xiosVersion}} \
+                                --output_file $OUTPUT_DIR/parameters.txt # Save parameters to output directory
+
+
+                            
+                            # Launch the actual job
+                            srun --nodes={{combination.clientNodes}} --tasks={{ combination.clientNodes * coresPerNode }} --ntasks-per-node={{ coresPerNode }} --cpus-per-task=1 --hint=nomultithread --distribution=block:block --output $OUTPUT_DIR/xios.out $LAUNCHER $BENCH_EXE  :  --nodes={{ combination.ioNodes }} --ntasks={{ combination.serversPerNode * combination.ioNodes }} --cpus-per-task={{ coresPerNode // combination.serversPerNode }} --ntasks-per-node={{ combination.serversPerNode }} --distribution=block:block --hint=nomultithread $LAUNCHER ${SERVER_EXE}
+                            
+                            
+                            """
+                    [[[directives]]]
+                        --nodes = {{ combination.ioNodes + combination.clientNodes }}
+                        --ntasks-per-node = {{ coresPerNode }}
+                        --cpus-per-task = 1
+                        --time = 00:20:00
+                        --partition = standard
+                        --account = z19
+                        --qos = standard
+                        --exclusive = 
+                    
+                [[analysis_xios_benchmark_{{ get_label(combination) }} ]]
                     inherit = XIOS_BENCHMARK
                     platform = localhost
                     script = """
                         
-                        DATA_DIR="${CYLC_WORKFLOW_SHARE_DIR}/xios_benchmark_{{ parameter_combination }}"
+                        DATA_DIR="{{ results_dir}}/xios_benchmark_{{ get_label(combination) }}"
                         python ${CYLC_RUN_DIR}/${CYLC_WORKFLOW_ID}/extract_performance.py \
                                 $DATA_DIR/xios.out \
                                 --output_file $DATA_DIR/timers.txt
                         
-                        python ${CYLC_RUN_DIR}/${CYLC_WORKFLOW_ID}/annotate.py \
-                                 --keys nfields operation io_nodes servers_per_node client_nodes \
-                                --values {{nfields}} {{operation}} {{io_nodes}} {{servers_per_node}} {{client_nodes}} \
-                                --output_file $DATA_DIR/performance.txt \
-                                    $DATA_DIR/timers.txt
-                        
-                        {% if profiler == "darshan" %}
-                        module load spack
-                        spack env activate /work/z19/shared/lparisi/xios-benchmark/environments/xios3_dev
-                        spack load darshan-util
 
-                        darshan-dxt-parser $DATA_DIR/logs/*.darshan > $DATA_DIR/dxt-trace.txt
+                        {% if profiler == "darshan" %}
+                            module load spack
+                            spack env activate /work/z19/shared/lparisi/xios-benchmark/environments/xios3_dev
+                            spack load darshan-util
+
+                            darshan-dxt-parser $DATA_DIR/logs/*.darshan > $DATA_DIR/dxt-trace.txt # Generate a human-readable trace from the Darshan logs
+                            dxt-to-perfetto $DATA_DIR/dxt-trace.txt > $DATA_DIR/dxt-trace.json # Convert the human-readable trace to a format that can be visualized in Perfetto
+
+                            darshan-parser $DATA_DIR/logs/*.darshan > $DATA_DIR/darshan_summary.txt # Generate a summary of the Darshan logs in a human-readable format
+                            summary-to-csv $DATA_DIR/darshan_summary.txt --filter_operation '.*_F_.*_TIME$' --filter_file '.*\.nc$' --output_file $DATA_DIR/darshan_summary.csv # Convert the human-readable summary to a CSV format
 
 
                         {% endif %}
 
 
                         """
-                    {% endfor %}
-                {% endfor %}
-            {% endfor %}
-        {% endfor %}
-        {% endfor %}
-    {% endfor %}
-
-
+    {%endfor %}                    
     [[collect_results]]
+        platform = localhost
         script = """
 
-            python ${CYLC_RUN_DIR}/${CYLC_WORKFLOW_ID}/collect_results.py \
-                    ${CYLC_WORKFLOW_SHARE_DIR} \
-                    --output_file ${CYLC_WORKFLOW_SHARE_DIR}/summary.txt
-            
+                {% if profiler == "darshan" %}
+
+                    python ${CYLC_RUN_DIR}/${CYLC_WORKFLOW_ID}/collect.py {{results_dir}} "darshan_summary.csv" "parameters.txt" --output_file {{results_dir}}/io_report_{{ experiment_name }}.txt
+                {% endif %}
+
+                python ${CYLC_RUN_DIR}/${CYLC_WORKFLOW_ID}/collect.py {{results_dir}} "timers.txt" "parameters.txt" --output_file {{results_dir}}/timers_report_{{ experiment_name }}.txt
+                
             """
